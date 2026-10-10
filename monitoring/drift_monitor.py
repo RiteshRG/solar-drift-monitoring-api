@@ -1,12 +1,21 @@
 import pandas as pd
 from scipy.stats import ks_2samp
 from datetime import datetime
+from google.cloud import storage
+from io import StringIO
 
 from utils import load_data
 
 import os
 
 os.makedirs("reports", exist_ok=True)
+
+BUCKET_NAME = "solar-monitoring-511206"
+REPORT_FILE = "reports/drift_report.csv"
+
+
+
+MINIMUM_CURRENT_RECORDS = 50
 
 
 def check_drift(reference, current, feature, alpha=0.05):
@@ -27,7 +36,20 @@ def check_drift(reference, current, feature, alpha=0.05):
         "drift_detected": drift_detected
     }
 
+
 def run_drift_monitoring(reference, current):
+
+    # Not enough production data
+    if len(current) < MINIMUM_CURRENT_RECORDS:
+
+        print(
+            f"Not enough production data for drift monitoring. "
+            f"Current records: {len(current)}, "
+            f"Required: {MINIMUM_CURRENT_RECORDS}"
+        )
+
+        return None
+
     monitoring_time = datetime.now().isoformat()
 
     results = []
@@ -36,6 +58,7 @@ def run_drift_monitoring(reference, current):
         "IRRADIATION",
         "AMBIENT_TEMPERATURE"
     ]:
+
         result = check_drift(
             reference,
             current,
@@ -47,45 +70,116 @@ def run_drift_monitoring(reference, current):
         results.append(result)
 
     report = pd.DataFrame(results)
+
     return report
 
-def save_report(report, report_file):
-    report.to_csv(
-        report_file,
-        mode="a",
-        header=not os.path.exists(report_file),
+
+def save_report(report):
+
+    if report is None:
+        return
+
+    client = storage.Client(
+        project="solar-power-monitoring-511206"
+    )
+
+    bucket = client.bucket(BUCKET_NAME)
+
+    blob = bucket.blob(REPORT_FILE)
+
+    # -----------------------------------
+    # Check if report already exists
+    # -----------------------------------
+
+    if blob.exists():
+
+        existing_data = blob.download_as_text()
+
+        existing_report = pd.read_csv(
+            StringIO(existing_data)
+        )
+
+        combined_report = pd.concat(
+            [existing_report, report],
+            ignore_index=True
+        )
+
+    else:
+
+        # First monitoring run
+        combined_report = report
+
+    # -----------------------------------
+    # Convert DataFrame to CSV
+    # -----------------------------------
+
+    csv_data = combined_report.to_csv(
         index=False
     )
 
+    # -----------------------------------
+    # Upload to GCS
+    # -----------------------------------
 
-def get_latest_status(report_file):
+    blob.upload_from_string(
+        csv_data,
+        content_type="text/csv"
+    )
 
-    report = pd.read_csv(report_file)
+    print(
+        f"Drift report saved to gs://"
+        f"{BUCKET_NAME}/{REPORT_FILE}"
+    )
 
-    latest_time = report["monitoring_time"].max()
+
+def get_latest_status():
+
+    client = storage.Client(
+        project="solar-power-monitoring-511206"
+    )
+
+    bucket = client.bucket(BUCKET_NAME)
+
+    blob = bucket.blob(REPORT_FILE)
+
+    # Report does not exist
+    if not blob.exists():
+        return "NO REPORT"
+
+    # Read report from GCS
+    report_data = blob.download_as_text()
+
+    report = pd.read_csv(
+        StringIO(report_data)
+    )
+
+    # Get latest monitoring timestamp
+    latest_time = report[
+        "monitoring_time"
+    ].max()
 
     latest_report = report[
         report["monitoring_time"] == latest_time
     ]
 
-    overall_drift = latest_report["drift_detected"].any()
+    # Check whether any feature has drift
+    overall_drift = latest_report[
+        "drift_detected"
+    ].any()
 
     if overall_drift:
         return "DRIFT DETECTED"
-    else:
-        return "NO DRIFT"
+
+    return "NO DRIFT"
+
 
 if __name__ == "__main__":
 
     REFERENCE_FILE = "data/train.csv"
-    CURRENT_FILE = "data/validation_drift.csv"
     REPORT_FILE = "reports/drift_report.csv"
 
-    alpha = 0.05
-
     reference, current = load_data(
-        REFERENCE_FILE,
-        CURRENT_FILE
+        REFERENCE_FILE
     )
 
     report = run_drift_monitoring(
@@ -93,9 +187,17 @@ if __name__ == "__main__":
         current
     )
 
-    save_report(report, REPORT_FILE)
+    if report is None:
 
+        print("Overall Result: NOT ENOUGH DATA")
 
-    status = get_latest_status(REPORT_FILE)
+    else:
 
-    print("Overall Result:", status)
+        save_report(report)
+
+        status = get_latest_status()
+
+        print(
+            "Overall Result:",
+            status
+        )

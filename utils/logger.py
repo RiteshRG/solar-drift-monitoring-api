@@ -1,10 +1,10 @@
 from google.cloud import storage
-import csv
-import io
 from datetime import datetime
+import json
+import uuid
 
-BUCKET_NAME = "YOUR_BUCKET_NAME"
-FILE_NAME = "production/production_predictions.csv"
+BUCKET_NAME = "solar-monitoring-511206"
+
 
 def log_prediction(
     irradiation,
@@ -13,41 +13,29 @@ def log_prediction(
     hour_cos,
     prediction
 ):
-    client = storage.Client()
+    client = storage.Client(
+    project="solar-power-monitoring-511206"
+)
 
     bucket = client.bucket(BUCKET_NAME)
-    blob = bucket.blob(FILE_NAME)
 
-    # Read existing file if it exists
-    if blob.exists():
-        existing_data = blob.download_as_text()
-    else:
-        existing_data = ""
+    timestamp = datetime.now().isoformat()
+    unique_id = uuid.uuid4().hex
 
-    output = io.StringIO()
+    file_name = f"production/prediction_{unique_id}.json"
 
-    writer = csv.writer(output)
+    prediction_data = {
+        "timestamp": timestamp,
+        "IRRADIATION": irradiation,
+        "AMBIENT_TEMPERATURE": ambient_temperature,
+        "HOUR_SIN": hour_sin,
+        "HOUR_COS": hour_cos,
+        "predicted_AC_POWER": prediction
+    }
 
-    if not existing_data:
-        writer.writerow([
-            "timestamp",
-            "IRRADIATION",
-            "AMBIENT_TEMPERATURE",
-            "HOUR_SIN",
-            "HOUR_COS",
-            "predicted_AC_POWER"
-        ])
-
-    writer.writerow([
-        datetime.now().isoformat(),
-        irradiation,
-        ambient_temperature,
-        hour_sin,
-        hour_cos,
-        prediction
-    ])
+    blob = bucket.blob(file_name)
 
     blob.upload_from_string(
-        existing_data + output.getvalue(),
-        content_type="text/csv"
+        json.dumps(prediction_data),
+        content_type="application/json"
     )
