@@ -9,7 +9,10 @@ from utils import create_time_features, log_prediction
 from schema import PredictionRequest, PredictionResponse
 
 from utils.data_loader import load_data
-from monitoring.drift_monitor import run_drift_monitoring
+from monitoring.drift_monitor import (
+    run_drift_monitoring,
+    save_report
+)
 
 
 app = FastAPI()
@@ -137,6 +140,7 @@ def predict(request: PredictionRequest):
 # Drift monitoring endpoint
 # -----------------------------------
 
+
 @app.get("/drift")
 def drift_monitor():
 
@@ -162,6 +166,9 @@ def drift_monitor():
                 "current_records": len(current),
                 "required_records": 50
             }
+
+        # Save drift report to Google Cloud Storage
+        save_report(report)
 
         # Convert report to JSON
         results = report.to_dict(
@@ -196,6 +203,7 @@ def drift_monitor():
             status_code=500,
             detail="Drift monitoring failed"
         ) from exc
+
 
 
 @app.get("/drift-report")

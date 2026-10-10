@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 
 
-API_URL = "http://127.0.0.1:8000/predict"
+API_URL = "https://solar-monitoring-api-875209489564.asia-south1.run.app/predict"
 
 
 # -----------------------------------

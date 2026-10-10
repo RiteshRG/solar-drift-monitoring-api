@@ -4,9 +4,9 @@ __pycache__/
 .git/
 .gitignore
 
-data/
 reports/
 notebooks/
+backup/
 
 .venv/
 venv/
