@@ -32,6 +32,20 @@ TARGET_COLUMN = "AC_POWER"
 EXPECTED_COLUMNS = (TARGET_COLUMN, *FEATURE_COLUMNS)
 MINIMUM_DATASET_ROWS = 10
 SUPPORTED_PYTHON_VERSION = (3, 11)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def repository_relative_path(path):
+    path = Path(path)
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
+
+    try:
+        return path.resolve().relative_to(REPOSITORY_ROOT).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            f"Model retraining files must be inside the repository: {path}"
+        ) from exc
 
 
 def sha256_file(path):
