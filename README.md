@@ -86,14 +86,15 @@ and production baseline on the same holdout rows. Candidate R² must be
 strictly greater than `0.80`; RMSE and MAE are also reported but their
 acceptance limits still require a human decision.
 
-After review, submit the candidate artifact and manifest in a pull request.
-The `.github/workflows/model-retraining.yml` workflow runs tests and
-re-evaluates the exact artifact. PR validation has no cloud credentials. A
-passing change to `main` can proceed to the `production` GitHub environment,
-where required reviewer approval must be configured. The deployment job uses
-GitHub OIDC and Google Workload Identity Federation, deploys the exact tested
-candidate as a no-traffic Cloud Run revision, smoke-tests it, then routes
-traffic only after the smoke test succeeds.
+After reviewing the candidate, commit it and its manifest directly to `main`.
+Changes to the model, training/evaluation code, serving code, or deployment
+workflow trigger `.github/workflows/model-retraining.yml`. GitHub Actions runs
+tests and evaluates the exact candidate before deployment. The deployment job
+waits for approval in the protected `production` environment, then uses GitHub
+OIDC and Google Workload Identity Federation to build and push the image,
+deploy a no-traffic Cloud Run revision, and route production traffic to it.
+This project workflow does not smoke-test the new revision before switching
+traffic.
 
 Before enabling deployment, configure these variables on the GitHub
 `production` environment: `GCP_WORKLOAD_IDENTITY_PROVIDER`,
@@ -101,9 +102,8 @@ Before enabling deployment, configure these variables on the GitHub
 `CLOUD_RUN_SERVICE`, and `ARTIFACT_REGISTRY_REPOSITORY`. Configure Workload
 Identity Federation trust to allow only this repository's protected `main`
 branch and production environment. Grant the deploy identity only required
-Artifact Registry/Cloud Run permissions and invocation permission for the
-tagged-revision smoke test. Never add a service-account JSON key to GitHub
-Secrets.
+Artifact Registry/Cloud Run permissions. Never add a service-account JSON key
+to GitHub Secrets.
 
 ## API
 

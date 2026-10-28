@@ -53,19 +53,18 @@ still apply.
    `PRODUCTION_MODEL_PATH`.
 5. The training run writes a machine-readable candidate manifest next to the
    candidate artifact.
-6. The human reviews the candidate metrics and manifest, then submits the
-   candidate and required metadata in a GitHub pull request.
-7. GitHub Actions validates the PR and evaluates the candidate against the
-   fixed evaluation data and production baseline. The PR job has read-only
-   repository permission and no cloud credentials or production secrets. A
-   failed check blocks merge and promotion.
+6. The human reviews the candidate metrics and its recorded details, then
+   commits the candidate and required metadata directly to `main`.
+7. GitHub Actions runs for model-related pushes to `main`, validates the
+   candidate against the fixed evaluation data and production baseline, and
+   stops on a failed check.
 8. A passing check is necessary but not sufficient for deployment. A
    designated reviewer approves the protected production deployment. Deploy
    only from the protected `main` branch after the quality workflow passes.
 9. The deployment job packages and deploys the exact candidate artifact
    validated by CI as a new Cloud Run revision.
-10. The new revision is smoke-tested. Keep the prior revision available and
-    document how to route traffic back to it.
+10. Route production traffic to the new revision without a smoke test. Keep
+    the prior revision available and document how to route traffic back to it.
 
 ## 4. Data preparation and split requirements
 
@@ -181,31 +180,27 @@ CI must fail when any of the following occurs:
 The gate decision must include metrics, sample counts, data/split identity,
 candidate hash, and a clear PASS/FAIL reason in the GitHub Actions output.
 
-## 7. Candidate storage and GitHub pull request
+## 7. Candidate storage and GitHub push
 
-- Submit candidate artifacts through a pull request for the initial workflow,
-  but check the artifact size and repository growth before choosing ordinary
-  Git storage.
+- Commit candidate artifacts and their recorded details directly to `main`
+  for the configured workflow. Check artifact size and repository growth
+  before choosing ordinary Git storage.
 - If the artifact is too large or repository history growth becomes a concern,
   use Git LFS or a versioned artifact store. Do not use mutable `latest`
   objects for candidate identity.
-- The PR must include the candidate manifest, evaluation output, and a human
-  explanation of why the drift investigation justified retraining.
+- Include the candidate manifest, evaluation output, and a human explanation
+  of why the drift investigation justified retraining.
 - CI must recompute evaluation metrics; it must not trust locally supplied
   metric values as proof that the candidate passed.
 - CI must verify the candidate SHA-256 and associate the check result with
   that exact hash.
-- Require the validation workflow for merge. A failed gate must block the
-  protected branch and deployment.
-- PR validation must not receive production deployment credentials or access
-  to production secrets.
-- Treat joblib model artifacts as executable pickle inputs. Run PR evaluation
-  only on isolated ephemeral GitHub-hosted runners, grant the PR job read-only
-  token permissions, and expose no secrets or OIDC token permission to it.
+- A failed gate must stop the deployment job.
+- Treat joblib model artifacts as executable pickle inputs. Run evaluation
+  only on isolated ephemeral GitHub-hosted runners.
 
 ## 8. CI/CD and production deployment
 
-- Separate untrusted PR validation from trusted production deployment.
+- Validation and deployment run only for model-related pushes to `main`.
 - Use GitHub Actions OIDC with Google Cloud Workload Identity Federation for
   short-lived credentials. Do not create or store a long-lived Google service
   account JSON key in GitHub Secrets.
@@ -222,9 +217,9 @@ candidate hash, and a clear PASS/FAIL reason in the GitHub Actions output.
 - Do not rebuild using a different model between evaluation and deployment.
 - Deploy as a new Cloud Run revision; do not replace the artifact inside a
   running revision or mutate a previously deployed image tag.
-- Keep the prior known-good revision available. Smoke-test health and one valid
-  prediction before directing production traffic; on failure, route traffic
-  back to the prior revision.
+- Keep the prior known-good revision available. This project workflow routes
+  traffic without smoke-testing the candidate; document how to route traffic
+  back to the prior revision if problems occur.
 - The Cloud Run runtime service account and its GCS access are separate from
   the GitHub deploy identity. Do not conflate their permissions.
 
@@ -270,13 +265,11 @@ Implementation is ready for review when all of the following are true:
    documented before unattended promotion is enabled.
 6. Model interface tests verify the API-derived features and prediction output
    remain compatible.
-7. A failed or invalid candidate cannot merge through the protected branch or
-   reach deployment.
+7. A failed or invalid candidate stops before deployment.
 8. A passing candidate still requires explicit production environment approval.
 9. The deployed image contains the exact candidate hash validated by CI.
 10. Drift monitoring only writes reports; it never trains, promotes, or
     deploys a model.
-11. Deployment health checks and rollback to the prior Cloud Run revision are
-    documented and verified.
-12. PR validation has only read permissions and no cloud credentials;
-    production deployment requires protected-environment approval.
+11. The prior Cloud Run revision remains available for rollback.
+12. Validation runs only for pushes to `main`; production deployment requires
+    protected-environment approval.

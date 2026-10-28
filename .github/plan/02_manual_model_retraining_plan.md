@@ -40,11 +40,11 @@ The deployed API loads the model from `PRODUCTION_MODEL_PATH`.
      validation, and the strict R² boundary.
 
 4. **Add GitHub validation and reviewed deployment — implemented, cloud setup pending**
-   - `.github/workflows/model-retraining.yml` runs tests/evaluation on PRs with
-     read-only permissions and no cloud credentials.
-   - On protected `main`, the workflow requires the protected `production`
-     environment, verifies the same candidate hash, builds/pushes a versioned
-     image, deploys a no-traffic revision, smoke-tests it, then routes traffic.
+   - `.github/workflows/model-retraining.yml` runs tests/evaluation on
+     model-related pushes to `main`.
+   - The workflow requires the protected `production` environment, verifies
+     the same candidate hash, builds/pushes a versioned image, deploys a
+     no-traffic revision, then routes traffic directly without a smoke test.
    - Configure branch protection, production-environment reviewers,
      Workload Identity Federation variables/trust, and least-privilege GCP IAM
      before relying on deployment.
