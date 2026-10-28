@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 import uuid
 
-BUCKET_NAME = "solar-monitoring-511206"
+from utils.constants import BUCKET_NAME, GCP_PROJECT_ID
 
 
 def log_prediction(
@@ -14,8 +14,8 @@ def log_prediction(
     prediction
 ):
     client = storage.Client(
-    project="solar-power-monitoring-511206"
-)
+        project=GCP_PROJECT_ID
+    )
 
     bucket = client.bucket(BUCKET_NAME)
 

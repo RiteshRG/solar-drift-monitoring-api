@@ -1,21 +1,23 @@
 import pandas as pd
 from scipy.stats import ks_2samp
-from datetime import datetime
+from datetime import datetime, timezone
+from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 from io import StringIO
 
 from utils import load_data
+from utils.constants import (
+    BUCKET_NAME,
+    GCP_PROJECT_ID,
+    MINIMUM_CURRENT_RECORDS,
+    REPORT_FILE,
+    RUN_REPORT_PREFIX,
+    TRAINING_DATA_PATH,
+)
 
 import os
 
 os.makedirs("reports", exist_ok=True)
-
-BUCKET_NAME = "solar-monitoring-511206"
-REPORT_FILE = "reports/drift_report.csv"
-
-
-
-MINIMUM_CURRENT_RECORDS = 50
 
 
 def check_drift(reference, current, feature, alpha=0.05):
@@ -50,7 +52,7 @@ def run_drift_monitoring(reference, current):
 
         return None
 
-    monitoring_time = datetime.now().isoformat()
+    monitoring_time = datetime.now(timezone.utc).isoformat()
 
     results = []
 
@@ -74,13 +76,17 @@ def run_drift_monitoring(reference, current):
     return report
 
 
-def save_report(report):
+def save_report(report, run_id=None):
 
     if report is None:
-        return
+        return False
+
+    report_to_save = report.copy()
+    if run_id is not None:
+        report_to_save["monitoring_run_id"] = run_id
 
     client = storage.Client(
-        project="solar-power-monitoring-511206"
+        project=GCP_PROJECT_ID
     )
 
     bucket = client.bucket(BUCKET_NAME)
@@ -88,54 +94,69 @@ def save_report(report):
     blob = bucket.blob(REPORT_FILE)
 
     # -----------------------------------
-    # Check if report already exists
-    # -----------------------------------
+    run_report = report_to_save
+    run_blob = None
 
-    if blob.exists():
+    if run_id is not None:
+        run_blob = bucket.blob(f"{RUN_REPORT_PREFIX}{run_id}.csv")
 
-        existing_data = blob.download_as_text()
+        if run_blob.exists():
+            run_report = pd.read_csv(
+                StringIO(run_blob.download_as_text())
+            )
+        else:
+            run_blob.upload_from_string(
+                report_to_save.to_csv(index=False),
+                content_type="text/csv",
+                if_generation_match=0,
+            )
 
-        existing_report = pd.read_csv(
-            StringIO(existing_data)
-        )
+    for _ in range(5):
+        if blob.exists():
+            blob.reload()
+            generation = blob.generation
+            existing_data = blob.download_as_text()
+            existing_report = pd.read_csv(StringIO(existing_data))
 
-        combined_report = pd.concat(
-            [existing_report, report],
-            ignore_index=True
-        )
+            if run_id is not None and (
+                "monitoring_run_id" in existing_report.columns
+                and run_id in existing_report["monitoring_run_id"].values
+            ):
+                return True
 
+            combined_report = pd.concat(
+                [existing_report, run_report],
+                ignore_index=True
+            )
+        else:
+            generation = 0
+            combined_report = run_report
+
+        try:
+            blob.upload_from_string(
+                combined_report.to_csv(index=False),
+                content_type="text/csv",
+                if_generation_match=generation,
+            )
+            break
+        except PreconditionFailed:
+            continue
     else:
-
-        # First monitoring run
-        combined_report = report
-
-    # -----------------------------------
-    # Convert DataFrame to CSV
-    # -----------------------------------
-
-    csv_data = combined_report.to_csv(
-        index=False
-    )
-
-    # -----------------------------------
-    # Upload to GCS
-    # -----------------------------------
-
-    blob.upload_from_string(
-        csv_data,
-        content_type="text/csv"
-    )
+        raise RuntimeError(
+            "Could not append drift results after repeated report updates."
+        )
 
     print(
         f"Drift report saved to gs://"
         f"{BUCKET_NAME}/{REPORT_FILE}"
     )
+    return True
 
 
 def get_latest_status():
 
     client = storage.Client(
-        project="solar-power-monitoring-511206"
+        project=GCP_PROJECT_ID
     )
 
     bucket = client.bucket(BUCKET_NAME)
@@ -175,11 +196,8 @@ def get_latest_status():
 
 if __name__ == "__main__":
 
-    REFERENCE_FILE = "data/train.csv"
-    REPORT_FILE = "reports/drift_report.csv"
-
     reference, current = load_data(
-        REFERENCE_FILE
+        TRAINING_DATA_PATH
     )
 
     report = run_drift_monitoring(
