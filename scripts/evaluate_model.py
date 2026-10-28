@@ -21,6 +21,7 @@ from utils.model_retraining import (
     dependency_versions,
     evaluate_quality_gate,
     load_labeled_dataset,
+    repository_relative_path,
     sha256_file,
     split_labeled_dataset,
     validate_model_contract,
@@ -60,14 +61,14 @@ def validate_candidate_manifest(
     if manifest.get("schema_version") != 1:
         raise ValueError("Unsupported candidate manifest schema version.")
 
-    if Path(manifest["candidate_artifact"]).resolve() != Path(candidate_path).resolve():
+    if manifest["candidate_artifact"] != repository_relative_path(candidate_path):
         raise ValueError("Manifest candidate path does not match the artifact.")
 
     if manifest.get("candidate_sha256") != sha256_file(candidate_path):
         raise ValueError("Candidate artifact SHA-256 does not match its manifest.")
 
     training_data = manifest.get("training_data", {})
-    if Path(training_data.get("path", "")).resolve() != Path(data_path).resolve():
+    if training_data.get("path") != repository_relative_path(data_path):
         raise ValueError("Manifest training data path does not match.")
     if training_data.get("sha256") != data_hash:
         raise ValueError("Training data SHA-256 does not match the manifest.")

@@ -22,6 +22,7 @@ from utils.model_retraining import (
     evaluate_quality_gate,
     get_git_commit,
     load_labeled_dataset,
+    repository_relative_path,
     sha256_file,
     split_labeled_dataset,
     validate_model_contract,
@@ -130,10 +131,10 @@ def main():
     manifest = {
         "schema_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "candidate_artifact": str(Path(args.candidate)),
+        "candidate_artifact": repository_relative_path(args.candidate),
         "candidate_sha256": candidate_hash,
         "training_data": {
-            "path": str(Path(args.data)),
+            "path": repository_relative_path(args.data),
             "sha256": data_hash,
             "row_count": len(features),
         },
@@ -157,7 +158,9 @@ def main():
         "dependency_versions": dependency_versions(),
         "evaluation": {
             "baseline": {
-                "artifact_path": PRODUCTION_MODEL_PATH,
+                "artifact_path": repository_relative_path(
+                    PRODUCTION_MODEL_PATH
+                ),
                 "artifact_sha256": sha256_file(PRODUCTION_MODEL_PATH),
                 "metrics": baseline_metrics,
             },

@@ -1,7 +1,7 @@
 {
-  "candidate_artifact": "models\\candidate_model_pipeline.joblib",
+  "candidate_artifact": "models/candidate_model_pipeline.joblib",
   "candidate_sha256": "341306a5d0ffd22376bb1e09266ec5444f41931bfa852ac14d401ab0748f2855",
-  "created_at_utc": "2026-10-28T13:29:44.983978+00:00",
+  "created_at_utc": "2026-10-28T14:01:04.454880+00:00",
   "dependency_versions": {
     "joblib": "1.5.3",
     "numpy": "2.3.3",
@@ -554,10 +554,10 @@
     ]
   },
   "target_column": "AC_POWER",
-  "training_code_commit": "9f9e273100c1b12db4d4663fb4947350ee096d87",
+  "training_code_commit": "13ca4bdab5426e83b85d94e2858ad843a4225790",
   "training_data": {
-    "path": "data\\train.csv",
+    "path": "data/train.csv",
     "row_count": 469,
-    "sha256": "e824f5cf33c41296e0f83cef02bafe137cc06e79f0e323f1dca0b33a0f72f922"
+    "sha256": "3779d923777318b8e2f3496f48984319cf0d9cb42390e6168762e7bd27ade383"
   }
 }

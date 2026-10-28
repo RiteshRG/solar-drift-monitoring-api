@@ -10,6 +10,8 @@ from utils.model_retraining import (
     EXPECTED_COLUMNS,
     evaluate_quality_gate,
     load_labeled_dataset,
+    repository_relative_path,
+    sha256_text_file_normalized,
     split_labeled_dataset,
     calculate_metrics,
     build_model,
@@ -79,6 +81,26 @@ class ModelRetrainingTests(unittest.TestCase):
         self.assertFalse(evaluate_quality_gate({"r2": 0.80})["r2_passed"])
         self.assertTrue(evaluate_quality_gate({"r2": 0.800001})["r2_passed"])
         self.assertFalse(evaluate_quality_gate({"r2": float("nan")})["r2_passed"])
+
+    def test_manifest_paths_use_repository_relative_posix_format(self):
+        self.assertEqual(
+            repository_relative_path("models/candidate_model_pipeline.joblib"),
+            "models/candidate_model_pipeline.joblib",
+        )
+        with self.assertRaisesRegex(ValueError, "inside the repository"):
+            repository_relative_path("../outside.csv")
+
+    def test_training_data_hash_ignores_windows_newlines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lf_path = Path(directory) / "lf.csv"
+            crlf_path = Path(directory) / "crlf.csv"
+            lf_path.write_bytes(b"AC_POWER,IRRADIATION\n1,0.5\n")
+            crlf_path.write_bytes(b"AC_POWER,IRRADIATION\r\n1,0.5\r\n")
+
+            self.assertEqual(
+                sha256_text_file_normalized(lf_path),
+                sha256_text_file_normalized(crlf_path),
+            )
 
     def test_metrics_reject_wrong_prediction_shape(self):
         model = DummyRegressor(strategy="mean").fit(
