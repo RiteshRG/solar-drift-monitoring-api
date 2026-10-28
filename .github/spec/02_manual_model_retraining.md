@@ -64,7 +64,8 @@ still apply.
    only from the protected `main` branch after the quality workflow passes.
 9. The deployment job packages and deploys the exact candidate artifact
    validated by CI as a new Cloud Run revision.
-10. The new revision is smoke-tested. Keep the prior revision available and
+10. Route production traffic to the new revision. This project workflow does
+    not smoke-test the revision first; keep the prior revision available and
     document how to route traffic back to it.
 
 ## 4. Data preparation and split requirements

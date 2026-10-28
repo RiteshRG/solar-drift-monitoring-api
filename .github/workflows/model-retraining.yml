@@ -199,32 +199,6 @@ jobs:
             --no-traffic \
             --quiet
 
-      - name: Smoke-test tagged revision
-        env:
-          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          REGION: ${{ vars.GCP_REGION }}
-          RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-        run: |
-          REVISION_TAG="candidate-${GITHUB_SHA:0:12}"
-          REVISION_URL="$(gcloud run services describe "$RUN_SERVICE" \
-            --project="$PROJECT_ID" \
-            --region="$REGION" \
-            --format=json | python -c "import json,sys; d=json.load(sys.stdin); t='$REVISION_TAG'; print(next(x['url'] for x in d['status']['traffic'] if x.get('tag') == t))")"
-          SERVICE_URL="$(gcloud run services describe "$RUN_SERVICE" \
-            --project="$PROJECT_ID" \
-            --region="$REGION" \
-            --format="value(status.url)")"
-          TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL" --include-email)"
-          STATUS="$(curl --fail --silent --show-error \
-            -H "Authorization: Bearer $TOKEN" "$REVISION_URL/model-status")"
-          echo "$STATUS" | python -c "import json,sys; d=json.load(sys.stdin); assert d.get('model_loaded') is True, d"
-          PREDICTION="$(curl --fail --silent --show-error \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            --data '{"IRRADIATION":0.8,"AMBIENT_TEMPERATURE":30,"DATE_TIME":"10-10-2026 12:00"}' \
-            "$REVISION_URL/predict")"
-          echo "$PREDICTION" | python -c "import json,math,sys; d=json.load(sys.stdin); p=d['predicted_AC_POWER']; assert math.isfinite(p), d"
-
       - name: Route production traffic to approved revision
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}

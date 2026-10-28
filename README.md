@@ -92,8 +92,9 @@ re-evaluates the exact artifact. PR validation has no cloud credentials. A
 passing change to `main` can proceed to the `production` GitHub environment,
 where required reviewer approval must be configured. The deployment job uses
 GitHub OIDC and Google Workload Identity Federation, deploys the exact tested
-candidate as a no-traffic Cloud Run revision, smoke-tests it, then routes
-traffic only after the smoke test succeeds.
+candidate as a no-traffic Cloud Run revision, then routes production traffic
+to it. This project workflow does not smoke-test the new revision before
+switching traffic.
 
 Before enabling deployment, configure these variables on the GitHub
 `production` environment: `GCP_WORKLOAD_IDENTITY_PROVIDER`,
@@ -101,9 +102,8 @@ Before enabling deployment, configure these variables on the GitHub
 `CLOUD_RUN_SERVICE`, and `ARTIFACT_REGISTRY_REPOSITORY`. Configure Workload
 Identity Federation trust to allow only this repository's protected `main`
 branch and production environment. Grant the deploy identity only required
-Artifact Registry/Cloud Run permissions and invocation permission for the
-tagged-revision smoke test. Never add a service-account JSON key to GitHub
-Secrets.
+Artifact Registry/Cloud Run permissions. Never add a service-account JSON key
+to GitHub Secrets.
 
 ## API
 
