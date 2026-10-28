@@ -1,7 +1,7 @@
 {
   "candidate_artifact": "models/candidate_model_pipeline.joblib",
   "candidate_sha256": "341306a5d0ffd22376bb1e09266ec5444f41931bfa852ac14d401ab0748f2855",
-  "created_at_utc": "2026-10-28T14:01:04.454880+00:00",
+  "created_at_utc": "2026-10-28T16:03:03.626024+00:00",
   "dependency_versions": {
     "joblib": "1.5.3",
     "numpy": "2.3.3",
@@ -554,7 +554,7 @@
     ]
   },
   "target_column": "AC_POWER",
-  "training_code_commit": "13ca4bdab5426e83b85d94e2858ad843a4225790",
+  "training_code_commit": "313cd8f3e9c150960fd40df3f5274866fe412724",
   "training_data": {
     "path": "data/train.csv",
     "row_count": 469,
