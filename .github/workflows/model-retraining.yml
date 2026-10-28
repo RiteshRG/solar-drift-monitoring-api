@@ -189,8 +189,8 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
           RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
           IMAGE: ${{ steps.image.outputs.image }}
-          REVISION_TAG: candidate-${{ github.sha }}
         run: |
+          REVISION_TAG="candidate-${GITHUB_SHA:0:12}"
           gcloud run deploy "$RUN_SERVICE" \
             --project="$PROJECT_ID" \
             --region="$REGION" \
@@ -204,8 +204,8 @@ jobs:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: ${{ vars.GCP_REGION }}
           RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-          REVISION_TAG: candidate-${{ github.sha }}
         run: |
+          REVISION_TAG="candidate-${GITHUB_SHA:0:12}"
           REVISION_URL="$(gcloud run services describe "$RUN_SERVICE" \
             --project="$PROJECT_ID" \
             --region="$REGION" \
@@ -230,8 +230,8 @@ jobs:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           REGION: ${{ vars.GCP_REGION }}
           RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-          REVISION_TAG: candidate-${{ github.sha }}
         run: |
+          REVISION_TAG="candidate-${GITHUB_SHA:0:12}"
           gcloud run services update-traffic "$RUN_SERVICE" \
             --project="$PROJECT_ID" \
             --region="$REGION" \
