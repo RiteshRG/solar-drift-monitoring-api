@@ -3,8 +3,7 @@ import time
 import statistics
 from concurrent.futures import ThreadPoolExecutor
 
-
-API_URL = "https://solar-monitoring-api-875209489564.asia-south1.run.app/predict"
+from utils.constants import API_URL
 
 TOTAL_REQUESTS = 100
 CONCURRENCY = 10

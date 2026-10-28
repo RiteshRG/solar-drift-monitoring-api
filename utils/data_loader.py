@@ -2,11 +2,14 @@ import pandas as pd
 import json
 
 from google.cloud import storage
+from utils.constants import (
+    BUCKET_NAME,
+    GCP_PROJECT_ID,
+    MINIMUM_CURRENT_RECORDS,
+)
 
 
-BUCKET_NAME = "solar-monitoring-511206"
 PRODUCTION_PREFIX = "production/"
-MINIMUM_CURRENT_RECORDS = 50
 
 
 def load_data(reference_file):
@@ -22,7 +25,7 @@ def load_data(reference_file):
     # -----------------------------------
 
     client = storage.Client(
-        project="solar-power-monitoring-511206"
+        project=GCP_PROJECT_ID
     )
 
     bucket = client.bucket(BUCKET_NAME)

@@ -1,11 +1,23 @@
 from fastapi import FastAPI, HTTPException
+from fastapi import Request as FastAPIRequest
+from google.auth.exceptions import GoogleAuthError
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token
 import joblib
 import logging
+import os
 from datetime import datetime
 
 import pandas as pd
 
 from utils import create_time_features, log_prediction
+from utils.constants import (
+    BUCKET_NAME,
+    GCP_PROJECT_ID,
+    PRODUCTION_MODEL_PATH,
+    REPORT_FILE,
+    TRAINING_DATA_PATH,
+)
 from schema import PredictionRequest, PredictionResponse
 
 from utils.data_loader import load_data
@@ -13,6 +25,7 @@ from monitoring.drift_monitor import (
     run_drift_monitoring,
     save_report
 )
+from monitoring.monitoring_trigger import run_scheduled_monitoring
 
 
 app = FastAPI()
@@ -22,7 +35,7 @@ app = FastAPI()
 # Load model once when API starts
 # -----------------------------------
 
-model = joblib.load("models/model_pipeline.joblib")
+model = joblib.load(PRODUCTION_MODEL_PATH)
 
 MODEL_STATUS_MESSAGE = (
     "model loaded successfully"
@@ -136,6 +149,62 @@ def predict(request: PredictionRequest):
         ) from exc
 
 
+@app.post("/monitoring/check")
+def scheduled_drift_check(request: FastAPIRequest):
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="A valid Cloud Scheduler identity token is required.",
+        )
+
+    scheduler_service_account = os.getenv(
+        "MONITORING_SCHEDULER_SERVICE_ACCOUNT"
+    )
+    if not scheduler_service_account:
+        raise HTTPException(
+            status_code=503,
+            detail="Scheduled monitoring authentication is not configured.",
+        )
+
+    token_audience = os.getenv("MONITORING_TOKEN_AUDIENCE")
+    if not token_audience:
+        raise HTTPException(
+            status_code=503,
+            detail="Scheduled monitoring token audience is not configured.",
+        )
+
+    try:
+        claims = id_token.verify_oauth2_token(
+            authorization.removeprefix("Bearer "),
+            GoogleAuthRequest(),
+            audience=token_audience,
+        )
+    except (ValueError, GoogleAuthError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Cloud Scheduler identity token.",
+        ) from exc
+
+    if (
+        claims.get("email") != scheduler_service_account
+        or claims.get("email_verified") is not True
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Caller is not the configured monitoring scheduler.",
+        )
+
+    try:
+        return run_scheduled_monitoring()
+    except Exception as exc:
+        logging.exception("Scheduled drift monitoring failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Scheduled drift monitoring failed.",
+        ) from exc
+
+
 # -----------------------------------
 # Drift monitoring endpoint
 # -----------------------------------
@@ -149,7 +218,7 @@ def drift_monitor():
         # Reference = training data
         # Current = production data from GCS
         reference, current = load_data(
-            "data/train.csv"
+            TRAINING_DATA_PATH
         )
 
         # Run drift monitoring
@@ -214,11 +283,8 @@ def get_drift_report():
         from google.cloud import storage
         from io import StringIO
 
-        BUCKET_NAME = "solar-monitoring-511206"
-        REPORT_FILE = "reports/drift_report.csv"
-
         client = storage.Client(
-            project="solar-power-monitoring-511206"
+            project=GCP_PROJECT_ID
         )
 
         bucket = client.bucket(
@@ -282,11 +348,10 @@ def get_production_data():
         from google.cloud import storage
         import json
 
-        BUCKET_NAME = "solar-monitoring-511206"
         PRODUCTION_PREFIX = "production/"
 
         client = storage.Client(
-            project="solar-power-monitoring-511206"
+            project=GCP_PROJECT_ID
         )
 
         bucket = client.bucket(

@@ -37,7 +37,10 @@ Solar generation and weather data
       (data/train.csv vs recent GCS data)
 ```
 
-The repository includes a helper that checks whether 50 new production records have accumulated. It does **not** contain a Cloud Scheduler job definition, so an active scheduled monitoring job should not be assumed.
+The API includes a Cloud Scheduler endpoint that checks for at least 50 new
+production records and persists a run report. Cloud Scheduler requires separate
+cloud configuration; until configured, monitoring is not automatic. Drift
+reports are stored in GCS; email alerts are out of scope.
 
 ## Model and data
 
@@ -55,6 +58,53 @@ The notebook merges generation and weather records by `DATE_TIME`, aggregates to
 
 The notebook’s saved evaluation results for Gradient Boosting are RMSE `523.1008687264176` and R² `0.9963766551780785` on its held-out split; its saved five-fold cross-validation means are RMSE `627.613143` and R² `0.993689`. These are historical notebook outputs, not a fresh training run.
 
+## Manual candidate retraining
+
+Retraining is a separate, human-started workflow. Review the drift report and
+investigate its cause first; automatic monitoring never trains or deploys a
+model. Candidate training requires Python 3.11 and the pinned dependencies so
+the joblib artifact matches the serving runtime:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m scripts.retrain_model
+```
+
+The one-command pipeline trains the candidate and then evaluates it. If
+training fails, evaluation does not run; if evaluation fails the R² gate, the
+command exits unsuccessfully and the production model remains unchanged.
+Successful training creates `models/candidate_model_pipeline.joblib` and
+`models/candidate_model_pipeline.manifest.json`.
+
+Training reads `data/train.csv`, validates the feature/target schema, uses the
+reproducible 80/20 split with seed 42, and writes
+`models/candidate_model_pipeline.joblib` plus its JSON manifest. It never
+overwrites `models/model_pipeline.joblib`. Evaluation compares the candidate
+and production baseline on the same holdout rows. Candidate R² must be
+strictly greater than `0.80`; RMSE and MAE are also reported but their
+acceptance limits still require a human decision.
+
+After review, submit the candidate artifact and manifest in a pull request.
+The `.github/workflows/model-retraining.yml` workflow runs tests and
+re-evaluates the exact artifact. PR validation has no cloud credentials. A
+passing change to `main` can proceed to the `production` GitHub environment,
+where required reviewer approval must be configured. The deployment job uses
+GitHub OIDC and Google Workload Identity Federation, deploys the exact tested
+candidate as a no-traffic Cloud Run revision, smoke-tests it, then routes
+traffic only after the smoke test succeeds.
+
+Before enabling deployment, configure these variables on the GitHub
+`production` environment: `GCP_WORKLOAD_IDENTITY_PROVIDER`,
+`GCP_DEPLOY_SERVICE_ACCOUNT`, `GCP_PROJECT_ID`, `GCP_REGION`,
+`CLOUD_RUN_SERVICE`, and `ARTIFACT_REGISTRY_REPOSITORY`. Configure Workload
+Identity Federation trust to allow only this repository's protected `main`
+branch and production environment. Grant the deploy identity only required
+Artifact Registry/Cloud Run permissions and invocation permission for the
+tagged-revision smoke test. Never add a service-account JSON key to GitHub
+Secrets.
+
 ## API
 
 | Method | Endpoint | Description |
@@ -63,6 +113,7 @@ The notebook’s saved evaluation results for Gradient Boosting are RMSE `523.10
 | `GET` | `/model-status` | Model load/health status |
 | `POST` | `/predict` | Predict AC power and log the record to GCS |
 | `GET` | `/drift` | Compare reference and current windows; save and return the latest drift results |
+| `POST` | `/monitoring/check` | Cloud Scheduler endpoint; validates its Google identity token, checks the 50-new-record threshold, and runs monitoring when due |
 | `GET` | `/drift-report` | Read the accumulated drift report from GCS |
 | `GET` | `/production-data` | Read production JSON records from GCS |
 
@@ -80,7 +131,14 @@ The timestamp format is `DD-MM-YYYY HH:MM`. The response contains `predicted_AC_
 
 ## Drift monitoring
 
-The monitor uses the training dataset as the reference and the latest production records from GCS as the current window. It requires at least 50 current records, tests `IRRADIATION` and `AMBIENT_TEMPERATURE` independently, and flags drift when `p_value < 0.05`. The report is appended to `reports/drift_report.csv` in the configured GCS bucket.
+The monitor uses the training dataset as the reference and the latest production records from GCS as the current window. It requires at least 50 current records, tests `IRRADIATION` and `AMBIENT_TEMPERATURE` independently, and flags drift when `p_value < 0.05`. Each completed scheduled run is appended to `reports/drift_report.csv` and stored separately under `reports/runs/` in the configured GCS bucket.
+
+The scheduled endpoint is intended to be called every five minutes by Cloud
+Scheduler using an OIDC token from a dedicated service account. It runs drift
+monitoring only after at least 50 additional prediction records have arrived
+since the last persisted run. Retries reuse the same run ID to avoid duplicate
+report rows. No email is sent. A human reviews the GCS report and decides
+whether retraining is appropriate; monitoring does not train or deploy models.
 
 The latest run in the supplied local drift CSV is timestamped `2026-10-10T14:48:39.132124`:
 
@@ -125,7 +183,7 @@ python monitoring/monitoring_trigger.py
 
 - `generate_production_data.py` posts up to 60 rows from `data/validation.csv` to the Cloud Run URL configured in the script. It is separate from the load test.
 - `load_test.py` sends 100 requests with 10 concurrent workers and prints successful/failed request counts and p50/p95/p99 latency. The script currently targets the documented Cloud Run URL; inspect `API_URL` before use.
-- `monitoring_trigger.py` checks the count of GCS production objects against the last stored count. It does not itself invoke `/drift` or configure Cloud Scheduler.
+- `monitoring_trigger.py` contains the scheduled drift-check logic, including the 50-new-record threshold, GCS run state, and per-run reports. Cloud Scheduler must be configured separately to call `POST /monitoring/check`.
 
 The load-test script does not remove or separately identify cold-start requests. Account for a possible Cloud Run cold start when interpreting the percentiles.
 

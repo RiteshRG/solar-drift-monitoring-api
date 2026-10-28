@@ -1,0 +1,239 @@
+name: Model retraining quality gate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/model-retraining.yml"
+      - "Dockerfile"
+      - "app.py"
+      - "data/train.csv"
+      - "models/model_pipeline.joblib"
+      - "models/candidate_model_pipeline.joblib"
+      - "models/candidate_model_pipeline.manifest.json"
+      - "requirements.txt"
+      - "scripts/evaluate_model.py"
+      - "scripts/train_model.py"
+      - "tests/**"
+      - "utils/constants.py"
+      - "utils/model_retraining.py"
+      - "schema/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/model-retraining.yml"
+      - "Dockerfile"
+      - "app.py"
+      - "data/train.csv"
+      - "models/model_pipeline.joblib"
+      - "models/candidate_model_pipeline.joblib"
+      - "models/candidate_model_pipeline.manifest.json"
+      - "requirements.txt"
+      - "scripts/evaluate_model.py"
+      - "scripts/train_model.py"
+      - "tests/**"
+      - "utils/constants.py"
+      - "utils/model_retraining.py"
+      - "schema/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      candidate_sha256: ${{ steps.candidate.outputs.sha256 }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pinned project dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run model-contract tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Evaluate candidate against the production baseline
+        run: |
+          python -m scripts.evaluate_model \
+            --report-path evaluation-report.json
+
+      - name: Export candidate identity
+        id: candidate
+        if: success()
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          with open("evaluation-report.json", encoding="utf-8") as report_file:
+              report = json.load(report_file)
+          print(f"sha256={report['candidate']['sha256']}")
+          PY
+
+      - name: Add evaluation to the job summary
+        if: always()
+        run: |
+          {
+            echo "## Candidate model evaluation"
+            echo
+            echo "R² must be strictly greater than 0.80. RMSE and MAE are reported for reviewer consideration; their acceptance limits are not configured."
+            echo
+            if [ -f evaluation-report.json ]; then
+              echo '```json'
+              cat evaluation-report.json
+              echo '```'
+            else
+              echo "No evaluation report was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-model-evaluation
+          path: evaluation-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  deploy-approved-candidate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate-candidate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out validated source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pinned project dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Re-evaluate the exact candidate before packaging
+        run: |
+          python -m scripts.evaluate_model \
+            --report-path deployment-evaluation.json
+          python - <<'PY'
+          import json
+          with open("deployment-evaluation.json", encoding="utf-8") as report_file:
+              report = json.load(report_file)
+          if report["candidate"]["sha256"] != "${{ needs.validate-candidate.outputs.candidate_sha256 }}":
+              raise SystemExit("Candidate artifact changed after quality validation.")
+          PY
+
+      - name: Validate deployment configuration
+        env:
+          WIF_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          AR_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+        run: |
+          for name in WIF_PROVIDER DEPLOY_SERVICE_ACCOUNT PROJECT_ID REGION RUN_SERVICE AR_REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub production environment variable: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Authenticate to Google Cloud using Workload Identity Federation
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Build and push immutable candidate image
+        id: image
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          AR_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}
+        run: |
+          REGISTRY="${REGION}-docker.pkg.dev"
+          IMAGE="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/solar-monitoring-api:${GITHUB_SHA}"
+          docker build \
+            --build-arg MODEL_ARTIFACT=models/candidate_model_pipeline.joblib \
+            --tag "$IMAGE" .
+          gcloud auth configure-docker "$REGISTRY" --quiet
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy candidate revision without production traffic
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          REVISION_TAG: candidate-${{ github.sha }}
+        run: |
+          gcloud run deploy "$RUN_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --image="$IMAGE" \
+            --tag="$REVISION_TAG" \
+            --no-traffic \
+            --quiet
+
+      - name: Smoke-test tagged revision
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          REVISION_TAG: candidate-${{ github.sha }}
+        run: |
+          REVISION_URL="$(gcloud run services describe "$RUN_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --format=json | python -c "import json,sys; d=json.load(sys.stdin); t='$REVISION_TAG'; print(next(x['url'] for x in d['status']['traffic'] if x.get('tag') == t))")"
+          SERVICE_URL="$(gcloud run services describe "$RUN_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --format="value(status.url)")"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL" --include-email)"
+          STATUS="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $TOKEN" "$REVISION_URL/model-status")"
+          echo "$STATUS" | python -c "import json,sys; d=json.load(sys.stdin); assert d.get('model_loaded') is True, d"
+          PREDICTION="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"IRRADIATION":0.8,"AMBIENT_TEMPERATURE":30,"DATE_TIME":"10-10-2026 12:00"}' \
+            "$REVISION_URL/predict")"
+          echo "$PREDICTION" | python -c "import json,math,sys; d=json.load(sys.stdin); p=d['predicted_AC_POWER']; assert math.isfinite(p), d"
+
+      - name: Route production traffic to approved revision
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+          REVISION_TAG: candidate-${{ github.sha }}
+        run: |
+          gcloud run services update-traffic "$RUN_SERVICE" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --to-tags="${REVISION_TAG}=100" \
+            --quiet

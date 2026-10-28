@@ -3,8 +3,7 @@ import requests
 
 from datetime import datetime, timedelta
 
-
-API_URL = "https://solar-monitoring-api-875209489564.asia-south1.run.app/predict"
+from utils.constants import API_URL
 
 
 # -----------------------------------
@@ -81,4 +80,3 @@ for index, row in production_data.iterrows():
 print(
     "Production data generation completed."
 )
-
