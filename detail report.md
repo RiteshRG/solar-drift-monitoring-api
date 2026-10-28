@@ -102,6 +102,52 @@ Training/reference data: data/train.csv
 | Artifact Registry | Stores the built, versioned container image. |
 | Cloud Run | Hosts the API container and serves prediction requests. |
 
+### End-to-end working flow
+
+```mermaid
+flowchart TD
+    A[Training/reference data<br/>data/train.csv] --> B[Local manual training]
+    B --> C[Candidate model + evaluation metrics]
+    C --> D{Human review of drift and model quality}
+    D --> E[Commit candidate files to main]
+    E --> F[GitHub Actions validation job]
+    F --> G[Model contract tests + candidate re-evaluation]
+    G --> H{Quality gate passed?}
+    H -- No --> I[Stop and fix candidate]
+    H -- Yes --> J[Production environment approval]
+    J --> K[Build Docker image]
+    K --> L[Push image to Artifact Registry]
+    L --> M[Deploy new Cloud Run revision]
+    M --> N[Route production traffic]
+
+    O[Prediction API requests] --> P[FastAPI /predict endpoint]
+    P --> Q[Model prediction and response]
+    Q --> R[Write request + prediction to GCS production records]
+    R --> S[Cloud monitoring check]
+    S --> T[At least 50 new records?]
+    T -- No --> U[Wait for more production data]
+    T -- Yes --> V[Compare recent production inputs with training reference<br/>KS test per feature]
+    V --> W[Save drift report to GCS]
+    W --> X[Human investigates drift]
+    X --> D
+
+    Y[Drift signal] --> X
+    X --> Z[Decide whether retraining is appropriate]
+    Z --> B
+
+    classDef c fill:#e8f4ff,stroke:#4b87c4,color:#14213d,stroke-width:1px;
+    class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z c;
+```
+
+This flow shows the two linked but distinct operational loops in the project:
+
+1. The live prediction and drift-monitoring loop, where API requests are
+   logged to GCS and periodic monitoring checks compare the current production
+   feature distribution against the training reference.
+2. The human-led retraining and deployment loop, where a candidate model is
+   trained locally, evaluated, committed, validated in GitHub Actions, and
+   deployed to Cloud Run only after approval and checks.
+
 ## 4. Model and data
 
 ### Model contract
@@ -568,30 +614,54 @@ Requirements:
    cloud statuses, metrics, URLs, image tags, revision names, or configuration.
 3. Add a concise figure number and caption for every screenshot. Explain what
    each screenshot demonstrates in the workflow.
-4. If a placeholder has no matching screenshot, leave a clearly marked
+4. Include a dedicated flowchart/figure showing the full operational workflow
+   of the project. The diagram must cover the complete end-to-end cycle:
+   training/reference data -> local candidate training -> evaluation -> human
+   review -> commit to main -> GitHub Actions validation -> artifact build ->
+   Cloud Run deployment -> prediction serving -> GCS logging -> drift monitor ->
+   human investigation -> decision on retraining. Use the workflow already
+   described in this report as the source of truth.
+5. If a placeholder has no matching screenshot, leave a clearly marked
    "Screenshot not supplied" placeholder. Do not fabricate an image or claim
    that a cloud resource is configured based only on repository code.
-5. Keep the report understandable to a technical project evaluator. Explain
+6. Keep the report understandable to a technical project evaluator. Explain
    the KS statistic, p-value, alpha threshold, R² gate, candidate model,
    GitHub Actions, Workload Identity Federation, Artifact Registry, and Cloud
    Run in plain language while retaining the correct technical details.
-6. Clearly state that drift is not proof of reduced prediction accuracy, that
+7. Clearly state that drift is not proof of reduced prediction accuracy, that
    the candidate metrics matched the baseline in the recorded evaluation, and
    that production accuracy is not measured without labeled production
    outcomes.
-7. Preserve security: redact API keys, access tokens, private keys, passwords,
+8. Preserve security: redact API keys, access tokens, private keys, passwords,
    secret values, and any sensitive account information visible in screenshots.
    Never reproduce hidden or redacted values.
-8. Use a professional academic report structure with a title page, executive
+9. Use a professional academic report structure with a title page, executive
    summary, architecture, methodology, implementation, CI/CD and deployment,
    results, limitations, conclusion, and figure captions. Add a table of
    contents if the output format supports it.
-9. Do not claim that the current deployment has a smoke test; the documented
-   workflow routes traffic without one. Mention this as a limitation.
-10. Deliver the final report as a polished document. Keep the supplied
+10. Do not claim that the current deployment has a smoke test; the documented
+    workflow routes traffic without one. Mention this as a limitation.
+11. Deliver the final report as a polished document. Keep the supplied
     Markdown as the source of truth; if any screenshot appears to conflict
     with the text, identify the discrepancy instead of silently choosing a
     value.
+
+Use the following end-to-end flowchart structure in the report, preferably as a
+Mermaid diagram or equivalent process diagram:
+
+```text
+Training/reference data -> Local manual training -> Candidate model + metrics ->
+Human review -> Commit candidate to main -> GitHub Actions validation ->
+Quality gate passed? -> Yes: Production environment approval -> Build Docker
+image -> Push to Artifact Registry -> Deploy new Cloud Run revision -> Route
+production traffic
+
+Prediction API request -> FastAPI /predict -> Model prediction -> Save request
+and prediction to GCS -> Monitoring check -> At least 50 new records? -> Yes:
+Compare current production inputs with training reference (KS test) -> Save
+report to GCS -> Human investigation -> Decision on retraining -> Local manual
+training
+```
 ```
 
 ## 14. Conclusion

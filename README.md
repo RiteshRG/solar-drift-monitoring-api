@@ -42,6 +42,49 @@ production records and persists a run report. Cloud Scheduler requires separate
 cloud configuration; until configured, monitoring is not automatic. Drift
 reports are stored in GCS; email alerts are out of scope.
 
+## End-to-end workflow
+
+```mermaid
+flowchart TD
+    A[Training/reference data<br/>data/train.csv] --> B[Local manual training]
+    B --> C[Candidate model + evaluation metrics]
+    C --> D{Human review of drift and model quality}
+    D --> E[Commit candidate files to main]
+    E --> F[GitHub Actions validation job]
+    F --> G[Model contract tests + candidate re-evaluation]
+    G --> H{Quality gate passed?}
+    H -- No --> I[Stop and fix candidate]
+    H -- Yes --> J[Production environment approval]
+    J --> K[Build Docker image]
+    K --> L[Push image to Artifact Registry]
+    L --> M[Deploy new Cloud Run revision]
+    M --> N[Route production traffic]
+
+    O[Prediction API requests] --> P[FastAPI /predict endpoint]
+    P --> Q[Model prediction and response]
+    Q --> R[Write request + prediction to GCS production records]
+    R --> S[Monitoring check]
+    S --> T[At least 50 new records?]
+    T -- No --> U[Wait for more production data]
+    T -- Yes --> V[Compare current production inputs with training reference<br/>KS test per feature]
+    V --> W[Save drift report to GCS]
+    W --> X[Human investigates drift]
+    X --> D
+
+    Y[Drift signal] --> X
+    X --> Z[Decide whether retraining is appropriate]
+    Z --> B
+```
+
+This workflow separates two operational loops:
+
+1. The live prediction and drift-monitoring loop, where production requests are
+   logged to GCS and compared with the training reference data to identify
+   feature-distribution change.
+2. The human-led retraining and deployment loop, where a candidate model is
+   trained locally, evaluated, committed to `main`, validated through GitHub
+   Actions, and deployed to Cloud Run only after approval and checks.
+
 ## Model and data
 
 The model artifact is `models/model_pipeline.joblib`, a scikit-learn pipeline with `StandardScaler` and `GradientBoostingRegressor(random_state=42)`.
