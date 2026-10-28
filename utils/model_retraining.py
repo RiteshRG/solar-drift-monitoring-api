@@ -56,6 +56,12 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def sha256_text_file_normalized(path):
+    with Path(path).open("r", encoding="utf-8", newline=None) as file:
+        normalized_content = file.read().encode("utf-8")
+    return hashlib.sha256(normalized_content).hexdigest()
+
+
 def sha256_json(value):
     serialized = json.dumps(
         value,
@@ -67,7 +73,7 @@ def sha256_json(value):
 
 def load_labeled_dataset(path):
     path = Path(path)
-    dataset_hash = sha256_file(path)
+    dataset_hash = sha256_text_file_normalized(path)
     data = pd.read_csv(path)
 
     if tuple(data.columns) != EXPECTED_COLUMNS:
